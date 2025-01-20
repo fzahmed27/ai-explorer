@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Knowledge Explorer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome for icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1 class="main-title">
+            <i class="fas fa-robot me-2"></i>AI Knowledge Explorer
+        </h1>
+
+        <div class="app-card">
+            <h2 class="section-title">
+                <i class="fas fa-search me-2"></i>Wikipedia Search & AI Summary
+            </h2>
+            
+            <form id="searchForm" class="mb-4">
+                <div class="search-box">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="query" class="form-control" 
+                           placeholder="Enter a topic to search on Wikipedia...">
+                </div>
+                <div class="text-center">
+                    <button type="submit" class="btn btn-search">
+                        <i class="fas fa-search me-2"></i>Search
+                    </button>
+                </div>
+            </form>
+
+            <div id="loading" class="loading">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-2 text-muted">Fetching information...</p>
+            </div>
+
+            <div id="searchResults" class="results-card" style="display: none;">
+                <div class="results-content"></div>
+            </div>
+
+            <div class="text-center mt-4">
+                <button id="summarizeBtn" class="btn btn-summarize" style="display: none;">
+                    <i class="fas fa-magic me-2"></i>Summarize with AI
+                </button>
+            </div>
+
+            <div id="summaryResults" class="results-card" style="display: none;">
+                <div class="results-content"></div>
+            </div>
+
+            <div id="searchHistory" class="history-section">
+                <!-- Search history will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS and Popper.js -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/localStorage.js') }}"></script>
+    
+    <script>
+        // Initialize search history
+        const searchHistory = new SearchHistory();
+        searchHistory.updateHistoryUI();
+
+        let currentWikiContent = '';
+
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function showError(container, message) {
+            container.style.display = 'block';
+            container.querySelector('.results-content').innerHTML = `
+                <div class="error-message">
+                    <i class="fas fa-exclamation-circle me-2"></i>${message}
+                </div>
+            `;
+        }
+
+        // Wikipedia Search
+        document.getElementById('searchForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const query = document.getElementById('query').value.trim();
+            
+            if (!query) {
+                showError(document.getElementById('searchResults'), 'Please enter a search term');
+                return;
+            }
+
+            const searchResults = document.getElementById('searchResults');
+            const summarizeBtn = document.getElementById('summarizeBtn');
+            const summaryResults = document.getElementById('summaryResults');
+
+            showLoading();
+            searchResults.style.display = 'none';
+            summarizeBtn.style.display = 'none';
+            summaryResults.style.display = 'none';
+
+            try {
+                const response = await fetch(`http://localhost:5003/search?query=${encodeURIComponent(query)}`);
+                const data = await response.json();
+                
+                searchResults.style.display = 'block';
+                if (data.error) {
+                    showError(searchResults, data.error);
+                    currentWikiContent = '';
+                } else if (data.results && data.results.length > 0) {
+                    const resultsHtml = data.results.map(result => `
+                        <div class="search-result">
+                            <h3 class="results-title">
+                                <a href="${result.url}" target="_blank">${result.title}</a>
+                            </h3>
+                            <p class="mb-3">${result.summary}</p>
+                        </div>
+                    `).join('');
+                    
+                    searchResults.querySelector('.results-content').innerHTML = resultsHtml;
+                    currentWikiContent = data.results[0].summary;
+                    summarizeBtn.style.display = 'inline-block';
+                    
+                    // Add to search history
+                    searchHistory.addToHistory(query, data.results[0].summary);
+                } else {
+                    showError(searchResults, 'No results found');
+                    currentWikiContent = '';
+                }
+            } catch (error) {
+                showError(searchResults, `Error: ${error.message}`);
+                currentWikiContent = '';
+            } finally {
+                hideLoading();
+            }
+        };
+
+        // Text Summarizer
+        document.getElementById('summarizeBtn').onclick = async () => {
+            if (!currentWikiContent) {
+                showError(document.getElementById('summaryResults'), 'No content to summarize. Please search for a topic first.');
+                return;
+            }
+            
+            const summaryResults = document.getElementById('summaryResults');
+            showLoading();
+            summaryResults.style.display = 'none';
+
+            try {
+                const response = await fetch('http://localhost:5003/api/summarize', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text: currentWikiContent })
+                });
+                
+                const data = await response.json();
+                summaryResults.style.display = 'block';
+                
+                if (data.error) {
+                    showError(summaryResults, data.error);
+                } else {
+                    summaryResults.querySelector('.results-content').innerHTML = `
+                        <h3 class="results-title">
+                            <i class="fas fa-robot me-2"></i>AI Summary
+                        </h3>
+                        <p class="mb-0">${data.summary}</p>
+                    `;
+                }
+            } catch (error) {
+                showError(summaryResults, `Error: ${error.message}`);
+            } finally {
+                hideLoading();
+            }
+        };
+    </script>
+</body>
+</html>
