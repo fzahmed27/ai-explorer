@@ -1,10 +1,11 @@
-from flask import Flask, render_template, jsonify, request, redirect
+from flask import Flask, render_template, jsonify, request, redirect, send_file
 from flask_cors import CORS
 import wikipedia
 from openai import OpenAI
 import os
 import re
 import datetime as import_datetime
+from pathlib import Path
 
 def create_app(api_key=None):
     app = Flask(__name__)
@@ -22,6 +23,10 @@ def create_app(api_key=None):
     except Exception as e:
         print(f"Error initializing OpenAI client: {str(e)}")
         client = None
+    
+    # Ensure the audio directory exists
+    audio_dir = Path(app.root_path) / "static" / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
     
     @app.route('/')
     def index():
@@ -147,6 +152,43 @@ def create_app(api_key=None):
                 return jsonify({'error': f'OpenAI API error: {str(e)}'}), 500
             
         except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    @app.route('/api/speak', methods=['POST'])
+    def text_to_speech():
+        try:
+            if not client:
+                return jsonify({'error': 'OpenAI API key not configured or invalid'}), 500
+
+            data = request.get_json()
+            if not data or 'text' not in data:
+                return jsonify({'error': 'No text provided'}), 400
+
+            text = data['text']
+            
+            # Generate a unique filename for this speech
+            timestamp = import_datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"speech_{timestamp}.mp3"
+            speech_file_path = audio_dir / filename
+
+            # Create the speech file using OpenAI's TTS
+            response = client.audio.speech.create(
+                model="tts-1",
+                voice="alloy",  # Options: alloy, echo, fable, onyx, nova, shimmer
+                input=text
+            )
+
+            # Save the audio file
+            response.stream_to_file(str(speech_file_path))
+
+            # Return the URL to the audio file
+            return jsonify({
+                'audio_url': f"/static/audio/{filename}",
+                'message': 'Speech generated successfully'
+            })
+
+        except Exception as e:
+            print(f"TTS error: {str(e)}")
             return jsonify({'error': str(e)}), 500
     
     return app 

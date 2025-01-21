@@ -54,8 +54,11 @@
                 <div class="results-content"></div>
                 <div class="text-center mt-3">
                     <button id="readAloud" class="btn btn-secondary" style="display: none;">
-                        <i class="fas fa-volume-up me-2"></i>Read Summary
+                        <i class="fas fa-volume-up me-2"></i>Listen to Summary
                     </button>
+                    <audio id="audioPlayer" style="display: none;" controls>
+                        Your browser does not support the audio element.
+                    </audio>
                 </div>
             </div>
 
@@ -77,8 +80,8 @@
 
         let currentWikiContent = '';
         let currentSummaryContent = '';
-        let speechSynthesis = window.speechSynthesis;
-        let speaking = false;
+        let currentAudioUrl = null;
+        const audioPlayer = document.getElementById('audioPlayer');
 
         function showLoading() {
             document.getElementById('loading').style.display = 'block';
@@ -97,49 +100,57 @@
             `;
         }
 
-        function stopSpeaking() {
-            if (speaking) {
-                window.speechSynthesis.cancel();  // Force stop any ongoing speech
-                window.speechSynthesis.resume();  // Resume to ensure clean state
-                speaking = false;
-                document.getElementById('readAloud').innerHTML = '<i class="fas fa-volume-up me-2"></i>Read Summary';
-            }
-        }
-
-        // Read Aloud functionality for Summary
-        document.getElementById('readAloud').onclick = function() {
-            if (speaking) {
-                stopSpeaking();
+        // Read Aloud functionality using OpenAI TTS
+        document.getElementById('readAloud').onclick = async function() {
+            const readAloudBtn = document.getElementById('readAloud');
+            
+            if (audioPlayer.src && !audioPlayer.paused) {
+                audioPlayer.pause();
+                audioPlayer.currentTime = 0;
+                audioPlayer.style.display = 'none';
+                readAloudBtn.innerHTML = '<i class="fas fa-volume-up me-2"></i>Listen to Summary';
                 return;
             }
 
-            if (currentSummaryContent) {
-                const utterance = new SpeechSynthesisUtterance(currentSummaryContent);
-                utterance.onend = function() {
-                    speaking = false;
-                    document.getElementById('readAloud').innerHTML = '<i class="fas fa-volume-up me-2"></i>Read Summary';
-                };
-                utterance.onpause = stopSpeaking;  // Handle pause events
-                utterance.oncancel = stopSpeaking; // Handle cancel events
-                speaking = true;
-                window.speechSynthesis.cancel();  // Clear any existing speech
-                this.innerHTML = '<i class="fas fa-volume-mute me-2"></i>Stop Reading';
-                window.speechSynthesis.speak(utterance);
+            if (!currentSummaryContent) {
+                showError(document.getElementById('summaryResults'), 'No summary to read');
+                return;
+            }
+
+            readAloudBtn.disabled = true;
+            readAloudBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Generating audio...';
+
+            try {
+                const response = await fetch('http://localhost:5003/api/speak', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ text: currentSummaryContent })
+                });
+                
+                const data = await response.json();
+                
+                if (data.error) {
+                    showError(document.getElementById('summaryResults'), data.error);
+                } else {
+                    audioPlayer.src = data.audio_url;
+                    audioPlayer.style.display = 'block';
+                    audioPlayer.play();
+                    readAloudBtn.innerHTML = '<i class="fas fa-volume-mute me-2"></i>Stop Audio';
+                }
+            } catch (error) {
+                showError(document.getElementById('summaryResults'), `Error: ${error.message}`);
+            } finally {
+                readAloudBtn.disabled = false;
             }
         };
 
-        // Add event listener to handle page visibility changes
-        document.addEventListener('visibilitychange', function() {
-            if (document.hidden && speaking) {
-                stopSpeaking();
-            }
-        });
-
-        // Add event listener to stop speech when navigating away
-        window.onbeforeunload = function() {
-            if (speaking) {
-                stopSpeaking();
-            }
+        // Handle audio player events
+        audioPlayer.onended = function() {
+            const readAloudBtn = document.getElementById('readAloud');
+            readAloudBtn.innerHTML = '<i class="fas fa-volume-up me-2"></i>Listen to Summary';
+            audioPlayer.style.display = 'none';
         };
 
         // Wikipedia Search
@@ -162,7 +173,9 @@
             summarizeBtn.style.display = 'none';
             summaryResults.style.display = 'none';
             readAloud.style.display = 'none';
-            stopSpeaking();
+            audioPlayer.style.display = 'none';
+            audioPlayer.pause();
+            audioPlayer.src = '';
 
             try {
                 const response = await fetch(`http://localhost:5003/search?query=${encodeURIComponent(query)}`);
@@ -212,7 +225,9 @@
             showLoading();
             summaryResults.style.display = 'none';
             readAloud.style.display = 'none';
-            stopSpeaking();
+            audioPlayer.style.display = 'none';
+            audioPlayer.pause();
+            audioPlayer.src = '';
 
             try {
                 const response = await fetch('http://localhost:5003/api/summarize', {
