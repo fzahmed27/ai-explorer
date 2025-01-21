@@ -43,16 +43,20 @@
 
             <div id="searchResults" class="results-card" style="display: none;">
                 <div class="results-content"></div>
-            </div>
-
-            <div class="text-center mt-4">
-                <button id="summarizeBtn" class="btn btn-summarize" style="display: none;">
-                    <i class="fas fa-magic me-2"></i>Summarize with AI
-                </button>
+                <div class="text-center mt-3">
+                    <button id="summarizeBtn" class="btn btn-summarize" style="display: none;">
+                        <i class="fas fa-magic me-2"></i>Summarize with AI
+                    </button>
+                </div>
             </div>
 
             <div id="summaryResults" class="results-card" style="display: none;">
                 <div class="results-content"></div>
+                <div class="text-center mt-3">
+                    <button id="readAloud" class="btn btn-secondary" style="display: none;">
+                        <i class="fas fa-volume-up me-2"></i>Read Summary
+                    </button>
+                </div>
             </div>
 
             <div id="searchHistory" class="history-section">
@@ -72,6 +76,9 @@
         searchHistory.updateHistoryUI();
 
         let currentWikiContent = '';
+        let currentSummaryContent = '';
+        let speechSynthesis = window.speechSynthesis;
+        let speaking = false;
 
         function showLoading() {
             document.getElementById('loading').style.display = 'block';
@@ -90,6 +97,51 @@
             `;
         }
 
+        function stopSpeaking() {
+            if (speaking) {
+                window.speechSynthesis.cancel();  // Force stop any ongoing speech
+                window.speechSynthesis.resume();  // Resume to ensure clean state
+                speaking = false;
+                document.getElementById('readAloud').innerHTML = '<i class="fas fa-volume-up me-2"></i>Read Summary';
+            }
+        }
+
+        // Read Aloud functionality for Summary
+        document.getElementById('readAloud').onclick = function() {
+            if (speaking) {
+                stopSpeaking();
+                return;
+            }
+
+            if (currentSummaryContent) {
+                const utterance = new SpeechSynthesisUtterance(currentSummaryContent);
+                utterance.onend = function() {
+                    speaking = false;
+                    document.getElementById('readAloud').innerHTML = '<i class="fas fa-volume-up me-2"></i>Read Summary';
+                };
+                utterance.onpause = stopSpeaking;  // Handle pause events
+                utterance.oncancel = stopSpeaking; // Handle cancel events
+                speaking = true;
+                window.speechSynthesis.cancel();  // Clear any existing speech
+                this.innerHTML = '<i class="fas fa-volume-mute me-2"></i>Stop Reading';
+                window.speechSynthesis.speak(utterance);
+            }
+        };
+
+        // Add event listener to handle page visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden && speaking) {
+                stopSpeaking();
+            }
+        });
+
+        // Add event listener to stop speech when navigating away
+        window.onbeforeunload = function() {
+            if (speaking) {
+                stopSpeaking();
+            }
+        };
+
         // Wikipedia Search
         document.getElementById('searchForm').onsubmit = async (e) => {
             e.preventDefault();
@@ -103,11 +155,14 @@
             const searchResults = document.getElementById('searchResults');
             const summarizeBtn = document.getElementById('summarizeBtn');
             const summaryResults = document.getElementById('summaryResults');
+            const readAloud = document.getElementById('readAloud');
 
             showLoading();
             searchResults.style.display = 'none';
             summarizeBtn.style.display = 'none';
             summaryResults.style.display = 'none';
+            readAloud.style.display = 'none';
+            stopSpeaking();
 
             try {
                 const response = await fetch(`http://localhost:5003/search?query=${encodeURIComponent(query)}`);
@@ -153,8 +208,11 @@
             }
             
             const summaryResults = document.getElementById('summaryResults');
+            const readAloud = document.getElementById('readAloud');
             showLoading();
             summaryResults.style.display = 'none';
+            readAloud.style.display = 'none';
+            stopSpeaking();
 
             try {
                 const response = await fetch('http://localhost:5003/api/summarize', {
@@ -170,16 +228,20 @@
                 
                 if (data.error) {
                     showError(summaryResults, data.error);
+                    currentSummaryContent = '';
                 } else {
+                    currentSummaryContent = data.summary;
                     summaryResults.querySelector('.results-content').innerHTML = `
                         <h3 class="results-title">
                             <i class="fas fa-robot me-2"></i>AI Summary
                         </h3>
                         <p class="mb-0">${data.summary}</p>
                     `;
+                    readAloud.style.display = 'inline-block';
                 }
             } catch (error) {
                 showError(summaryResults, `Error: ${error.message}`);
+                currentSummaryContent = '';
             } finally {
                 hideLoading();
             }
